@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+/* REGLAS DE IMPRESIÓN (PDF / IMPRESORA HARTA Y POS) */
+@media print {
+  /* Ocultar toda la interfaz oscura de la aplicación */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Hacer visible únicamente la hoja de la factura/orden */
+  #seccion-impresion, #seccion-impresion * {
+    visibility: visible !important;
+  }
+
+  #seccion-impresion {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Ocultar botones de la ventana de impresión */
+  .no-imprimir {
+    display: none !important;
+  }
+}
+
