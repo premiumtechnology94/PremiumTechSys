@@ -401,10 +401,16 @@ function MainApp() {
     tipo: 'AMBOS'
   });
 
-  // Estados nuevos para búsqueda y ordenamiento por fecha en Remisiones y Ventas
+  // Estados para búsqueda y ordenamiento en Remisiones y Ventas
   const [facturasFiltroInicio, setFacturasFiltroInicio] = useState('');
   const [facturasFiltroFin, setFacturasFiltroFin] = useState('');
   const [facturasOrdenFecha, setFacturasOrdenFecha] = useState('recientes'); // 'recientes' o 'antiguas'
+
+  // Estados nuevos para búsqueda, rango de fechas y ordenamiento en Reparaciones y Estado (Órdenes)
+  const [ordenesBusquedaTexto, setOrdenesBusquedaTexto] = useState('');
+  const [ordenesFiltroInicio, setOrdenesFiltroInicio] = useState('');
+  const [ordenesFiltroFin, setOrdenesFiltroFin] = useState('');
+  const [ordenesOrdenFecha, setOrdenesOrdenFecha] = useState('antiguas'); // 'antiguas' (más antiguo al más actual por defecto o recientes)
 
   const [tipoClienteOpt, setTipoClienteOpt] = useState('EXISTENTE');
   const [busquedaCliente, setBusquedaCliente] = useState('');
@@ -730,50 +736,158 @@ function MainApp() {
         {tab === 'ordenes' && (
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
             <h2 className="text-xl font-bold text-white">Seguimiento de Reparaciones</h2>
+            
+            {/* CONTROLES DE BÚSQUEDA, RANGO DE FECHAS Y ORDENAMIENTO EN REPARACIONES */}
+            <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/80 flex flex-wrap gap-3 items-end text-xs">
+              <div className="flex-1 min-w-[220px]">
+                <label className="text-slate-400 block mb-1 font-semibold">🔍 Buscar (Nombre, Cédula, Teléfono, Código)</label>
+                <input 
+                  type="text" 
+                  className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white placeholder-slate-500"
+                  placeholder="Ej. Juan Pérez, Cédula, Celular, TK-..."
+                  value={ordenesBusquedaTexto}
+                  onChange={e => setOrdenesBusquedaTexto(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">🔍 Desde la fecha</label>
+                <input 
+                  type="date" 
+                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white"
+                  value={ordenesFiltroInicio}
+                  onChange={e => setOrdenesFiltroInicio(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">🔍 Hasta la fecha</label>
+                <input 
+                  type="date" 
+                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white"
+                  value={ordenesFiltroFin}
+                  onChange={e => setOrdenesFiltroFin(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">⚡ Ordenar por Fecha</label>
+                <select 
+                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white font-bold"
+                  value={ordenesOrdenFecha}
+                  onChange={e => setOrdenesOrdenFecha(e.target.value)}
+                >
+                  <option value="antiguas">Más antiguo al más actual</option>
+                  <option value="recientes">Más recientes primero</option>
+                </select>
+              </div>
+              {(ordenesBusquedaTexto || ordenesFiltroInicio || ordenesFiltroFin) && (
+                <div>
+                  <button 
+                    onClick={() => { setOrdenesBusquedaTexto(''); setOrdenesFiltroInicio(''); setOrdenesFiltroFin(''); }}
+                    className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-xl font-semibold transition"
+                  >
+                    ✕ Limpiar Filtros
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-800 text-slate-400 uppercase">
                   <tr><th className="p-3">ID Registro</th><th className="p-3">Código Cliente</th><th className="p-3">Cliente / Atendió</th><th className="p-3">Equipo & Accesorios</th><th className="p-3">Estado</th><th className="p-3">Presupuesto / Total Pagar</th><th className="p-3 text-right">Acciones</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {ordenes.map((o, index) => {
-                    const idRegistroConsecutivo = `#${1001 + (ordenes.length - 1 - index)}`;
-                    return (
-                      <tr key={o.id} className="hover:bg-slate-800/40">
-                        <td className="p-3 font-bold text-indigo-400">{idRegistroConsecutivo}</td>
-                        <td className="p-3 font-mono text-xs text-amber-400 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-800/40">{o.codigo_seguimiento}</td>
-                        <td className="p-3 font-medium text-white">
-                          {o.cliente_nombre}
-                          <span className="block text-[10px] text-slate-500">{o.cliente_telefono}</span>
-                          <span className="block text-[10px] text-indigo-300 font-semibold mt-0.5">👤 Atendió: {o.usuario_creador || 'Sistema'}</span>
-                        </td>
-                        <td className="p-3">
-                          <p className="font-bold text-white">{o.tipo_equipo} {o.marca_modelo}</p>
-                          <p className="text-[10px] text-slate-400">S/N: {o.serie || 'N/A'}</p>
-                          <div className="flex gap-2 mt-1 text-[10px]">
-                            {o.deja_cargador && <span className="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800">🔌 Cargador</span>}
-                            {o.deja_bateria && <span className="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800">🔋 Batería {o.serie_bateria ? `(${o.serie_bateria})` : ''}</span>}
-                          </div>
-                        </td>
-                        <td className="p-3"><span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">{o.estado}</span></td>
-                        <td className="p-3 font-bold text-white">
-                          <div className="space-y-0.5">
-                            <span className="text-slate-400 text-[11px] block">Presupuesto: {o.valor_estimado ? `$ ${Number(o.valor_estimado).toLocaleString('es-CO')}` : '-'}</span>
-                            <span className="text-emerald-400 text-[11px] block">Total Pagar: {o.total_pagar ? `$ ${Number(o.total_pagar).toLocaleString('es-CO')}` : '-'}</span>
-                          </div>
-                          {o.numero_factura_asociada && (
-                            <span className="block text-[11px] text-indigo-400 font-mono mt-1">Remisión: {o.numero_factura_asociada}</span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right space-x-1">
-                          {permisos.editar_diagnostico && <button onClick={() => { setModalEditOrden(o); setEditOrdForm({ estado: o.estado, observacion: '', diagnostico: o.diagnostico || '', presupuesto: o.valor_estimado || 0, totalPagar: o.total_pagar || 0, repuestoCompraId: o.repuesto_compra_id || '' }); }} className="bg-indigo-600 text-white px-2 py-1 rounded text-[11px]">✏️ Diagnóstico</button>}
-                          <button onClick={() => enviarWhatsApp(o, idRegistroConsecutivo)} className="bg-emerald-600 text-white px-2 py-1 rounded text-[11px]">💬 WhatsApp</button>
-                          <button onClick={() => setDocumentoImprimir({ tipo: 'ORDEN', data: o, idConsecutivo: idRegistroConsecutivo })} className="bg-slate-800 text-white px-2 py-1 rounded text-[11px]">🖨️ PDF</button>
-                          {o.estado === 'Reparado / Listo' && permisos.facturar && <button onClick={() => setModalRemisionarOrden({ orden: o, compraId: o.repuesto_compra_id || '' })} className="bg-emerald-500 text-white px-2 py-1 rounded text-[11px] font-bold">📄 Remisionar</button>}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {(() => {
+                    const terminoBusq = normalizarBusqueda(ordenesBusquedaTexto);
+
+                    const ordenesFiltradas = ordenes.filter(o => {
+                      // 1. Búsqueda por texto (Nombre, Teléfono, Código de seguimiento o Cédula del cliente)
+                      if (terminoBusq) {
+                        const nombre = normalizarBusqueda(o.cliente_nombre);
+                        const telefono = normalizarBusqueda(o.cliente_telefono);
+                        const codigo = normalizarBusqueda(o.codigo_seguimiento);
+                        
+                        // Buscar cédula en el directorio de clientes
+                        const clienteEncontrado = clientes.find(c => normalizarBusqueda(c.nombre) === normalizarBusqueda(o.cliente_nombre));
+                        const cedula = normalizarBusqueda(clienteEncontrado?.cedula);
+
+                        const coincideTexto = nombre.includes(terminoBusq) ||
+                                              telefono.includes(terminoBusq) ||
+                                              codigo.includes(terminoBusq) ||
+                                              cedula.includes(terminoBusq);
+                        if (!coincideTexto) return false;
+                      }
+
+                      // 2. Filtro por rango de fechas (usando created_at o fecha)
+                      const fechaOrden = o.created_at ? o.created_at.split('T')[0] : (o.fecha || '');
+                      if (fechaOrden) {
+                        if (ordenesFiltroInicio && fechaOrden < ordenesFiltroInicio) return false;
+                        if (ordenesFiltroFin && fechaOrden > ordenesFiltroFin) return false;
+                      }
+
+                      return true;
+                    });
+
+                    // Ordenar según lo que el usuario elija
+                    const ordenesOrdenadas = [...ordenesFiltradas].sort((a, b) => {
+                      if (ordenesOrdenFecha === 'recientes') {
+                        return (b.id - a.id);
+                      } else {
+                        return (a.id - b.id); // Más antiguo al más actual
+                      }
+                    });
+
+                    if (ordenesOrdenadas.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan="7" className="text-center py-8 text-slate-400">
+                            No se encontraron órdenes con los filtros seleccionados.
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return ordenesOrdenadas.map((o) => {
+                      // Obtener índice original fijo para el ID de registro consecutivo
+                      const originalIndex = ordenes.findIndex(item => item.id === o.id);
+                      const idRegistroConsecutivo = `#${1001 + originalIndex}`;
+
+                      return (
+                        <tr key={o.id} className="hover:bg-slate-800/40">
+                          <td className="p-3 font-bold text-indigo-400">{idRegistroConsecutivo}</td>
+                          <td className="p-3 font-mono text-xs text-amber-400 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-800/40">{o.codigo_seguimiento}</td>
+                          <td className="p-3 font-medium text-white">
+                            {o.cliente_nombre}
+                            <span className="block text-[10px] text-slate-500">{o.cliente_telefono}</span>
+                            <span className="block text-[10px] text-indigo-300 font-semibold mt-0.5">👤 Atendió: {o.usuario_creador || 'Sistema'}</span>
+                          </td>
+                          <td className="p-3">
+                            <p className="font-bold text-white">{o.tipo_equipo} {o.marca_modelo}</p>
+                            <p className="text-[10px] text-slate-400">S/N: {o.serie || 'N/A'}</p>
+                            <div className="flex gap-2 mt-1 text-[10px]">
+                              {o.deja_cargador && <span className="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800">🔌 Cargador</span>}
+                              {o.deja_bateria && <span className="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800">🔋 Batería {o.serie_bateria ? `(${o.serie_bateria})` : ''}</span>}
+                            </div>
+                          </td>
+                          <td className="p-3"><span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">{o.estado}</span></td>
+                          <td className="p-3 font-bold text-white">
+                            <div className="space-y-0.5">
+                              <span className="text-slate-400 text-[11px] block">Presupuesto: {o.valor_estimado ? `$ ${Number(o.valor_estimado).toLocaleString('es-CO')}` : '-'}</span>
+                              <span className="text-emerald-400 text-[11px] block">Total Pagar: {o.total_pagar ? `$ ${Number(o.total_pagar).toLocaleString('es-CO')}` : '-'}</span>
+                            </div>
+                            {o.numero_factura_asociada && (
+                              <span className="block text-[11px] text-indigo-400 font-mono mt-1">Remisión: {o.numero_factura_asociada}</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right space-x-1">
+                            {permisos.editar_diagnostico && <button onClick={() => { setModalEditOrden(o); setEditOrdForm({ estado: o.estado, observacion: '', diagnostico: o.diagnostico || '', presupuesto: o.valor_estimado || 0, totalPagar: o.total_pagar || 0, repuestoCompraId: o.repuesto_compra_id || '' }); }} className="bg-indigo-600 text-white px-2 py-1 rounded text-[11px]">✏️ Diagnóstico</button>}
+                            <button onClick={() => enviarWhatsApp(o, idRegistroConsecutivo)} className="bg-emerald-600 text-white px-2 py-1 rounded text-[11px]">💬 WhatsApp</button>
+                            <button onClick={() => setDocumentoImprimir({ tipo: 'ORDEN', data: o, idConsecutivo: idRegistroConsecutivo })} className="bg-slate-800 text-white px-2 py-1 rounded text-[11px]">🖨️ PDF</button>
+                            {o.estado === 'Reparado / Listo' && permisos.facturar && <button onClick={() => setModalRemisionarOrden({ orden: o, compraId: o.repuesto_compra_id || '' })} className="bg-emerald-500 text-white px-2 py-1 rounded text-[11px] font-bold">📄 Remisionar</button>}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -930,14 +1044,13 @@ function MainApp() {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {(() => {
-                    // Filtrar por rango de fechas si están definidas
                     const facturasFiltradas = facturas.filter(f => {
-                      if (facturasFiltroInicio && f.fecha < facturasFiltroInicio) return false;
-                      if (facturasFiltroFin && f.fecha > facturasFiltroFin) return false;
+                      const fechaF = f.fecha; 
+                      if (facturasFiltroInicio && fechaF < facturasFiltroInicio) return false;
+                      if (facturasFiltroFin && fechaF > facturasFiltroFin) return false;
                       return true;
                     });
 
-                    // Ordenar según la selección del usuario
                     const facturasOrdenadas = [...facturasFiltradas].sort((a, b) => {
                       if (facturasOrdenFecha === 'recientes') {
                         return new Date(b.fecha) - new Date(a.fecha) || b.id - a.id;
@@ -1740,7 +1853,6 @@ function MainApp() {
                   const nombreClienteLimpio = (doc.cliente_nombre || 'Cliente').replace(/[^a-zA-Z0-9]/g, '_');
                   const telefonoLimpio = (doc.cliente_telefono || '0000000000').replace(/[^a-zA-Z0-9]/g, '');
                   
-                  // Nombre del archivo estructurado con número, cliente y celular
                   const elHtml = document.getElementById('seccion-impresion').innerHTML;
                   const blob = new Blob([`<html><head><title>Comprobante</title><style>body{font-family:sans-serif;padding:20px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #ccc;padding:8px;}</style></head><body>${elHtml}</body></html>`], { type: 'text/html' });
                   const url = URL.createObjectURL(blob);
