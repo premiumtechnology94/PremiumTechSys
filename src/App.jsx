@@ -457,7 +457,7 @@ function MainApp() {
   const clientesFiltradosVenta = clientes.filter(c => c.nombre.toLowerCase().includes(busquedaClienteVenta.toLowerCase()) || String(c.telefono || '').includes(busquedaClienteVenta));
 
   const enviarWhatsApp = (orden, idConsecutivoStr) => {
-    const msg = `Hola *${orden.cliente_nombre}* 👋\n\nTe saludamos de *${empresa.nombre}*.\n\nTu orden *${idConsecutivoStr}* (*${orden.tipo_equipo} ${orden.marca_modelo}*) se encuentra en estado: *${orden.estado}*.\n\nPuedes consultar el avance, diagnóstico y estado de tu equipo ingresando a nuestra plataforma:\n🔗 https://syspcdoctor.vercel.app/portal\n\nUtiliza tu código único: *${orden.codigo_seguimiento}*`;
+    const msg = `Hola *${orden.cliente_nombre}* 👋\n\nTe saludamos de *${empresa.nombre}*.\n\nTu orden *${idConsecutivoStr}* (*${orden.tipo_equipo} ${orden.marca_modelo}*) se encuentra en estado: *${orden.estado}*.\n\nPuedes consultar el avance, diagnóstico y estado de tu equipo ingresando a nuestra plataforma:\n🔗 https://https://premium-tech-sys.vercel.app/portal\n\nUtiliza tu código único: *${orden.codigo_seguimiento}*`;
     window.open(`https://wa.me/57${orden.cliente_telefono}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
