@@ -401,6 +401,11 @@ function MainApp() {
     tipo: 'AMBOS'
   });
 
+  // Estados nuevos para búsqueda y ordenamiento por fecha en Remisiones y Ventas
+  const [facturasFiltroInicio, setFacturasFiltroInicio] = useState('');
+  const [facturasFiltroFin, setFacturasFiltroFin] = useState('');
+  const [facturasOrdenFecha, setFacturasOrdenFecha] = useState('recientes'); // 'recientes' o 'antiguas'
+
   const [tipoClienteOpt, setTipoClienteOpt] = useState('EXISTENTE');
   const [busquedaCliente, setBusquedaCliente] = useState('');
   const [busquedaDirectorioClientes, setBusquedaDirectorioClientes] = useState('');
@@ -457,7 +462,7 @@ function MainApp() {
   const clientesFiltradosVenta = clientes.filter(c => c.nombre.toLowerCase().includes(busquedaClienteVenta.toLowerCase()) || String(c.telefono || '').includes(busquedaClienteVenta));
 
   const enviarWhatsApp = (orden, idConsecutivoStr) => {
-    const msg = `Hola *${orden.cliente_nombre}* 👋\n\nTe saludamos de *${empresa.nombre}*.\n\nTu orden *${idConsecutivoStr}* (*${orden.tipo_equipo} ${orden.marca_modelo}*) se encuentra en estado: *${orden.estado}*.\n\nPuedes consultar el avance, diagnóstico y estado de tu equipo ingresando a nuestra plataforma:\n🔗 https://https://premium-tech-sys.vercel.app/portal\n\nUtiliza tu código único: *${orden.codigo_seguimiento}*`;
+    const msg = `Hola *${orden.cliente_nombre}* 👋\n\nTe saludamos de *${empresa.nombre}*.\n\nTu orden *${idConsecutivoStr}* (*${orden.tipo_equipo} ${orden.marca_modelo}*) se encuentra en estado: *${orden.estado}*.\n\nPuedes consultar el avance, diagnóstico y estado de tu equipo ingresando a nuestra plataforma:\n🔗 https://premium-tech-sys.vercel.app/portal\n\nUtiliza tu código único: *${orden.codigo_seguimiento}*`;
     window.open(`https://wa.me/57${orden.cliente_telefono}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
@@ -509,7 +514,7 @@ function MainApp() {
       csvContent += linea + "\r\n";
     });
 
-    csvContent += `\r\n,,, ,TOTALES DEL PERIODO:,"$${sumaTotalCostos}","$${sumaTotalVentas}","$${sumaTotalGanancias}"\r\n`;
+    csvContent += `\r\n,,, ,TOTALES DEL PERIODOS:,"$${sumaTotalCostos}","$${sumaTotalVentas}","$${sumaTotalGanancias}"\r\n`;
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -867,6 +872,50 @@ function MainApp() {
                 <button onClick={() => { setModalVenta(true); setTipoClienteVentaOpt('EXISTENTE'); setClienteVentaSeleccionado(null); setCompraSeleccionadaVentaId(''); }} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold">+ Venta Directa</button>
               </div>
             </div>
+
+            {/* CONTROLES DE BÚSQUEDA Y ORDENAMIENTO POR FECHA */}
+            <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/80 flex flex-wrap gap-3 items-end text-xs">
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">🔍 Desde la fecha</label>
+                <input 
+                  type="date" 
+                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white"
+                  value={facturasFiltroInicio}
+                  onChange={e => setFacturasFiltroInicio(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">🔍 Hasta la fecha</label>
+                <input 
+                  type="date" 
+                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white"
+                  value={facturasFiltroFin}
+                  onChange={e => setFacturasFiltroFin(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">⚡ Ordenar por Fecha</label>
+                <select 
+                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white font-bold"
+                  value={facturasOrdenFecha}
+                  onChange={e => setFacturasOrdenFecha(e.target.value)}
+                >
+                  <option value="recientes">Más recientes primero</option>
+                  <option value="antiguas">Más antiguas primero</option>
+                </select>
+              </div>
+              {(facturasFiltroInicio || facturasFiltroFin) && (
+                <div>
+                  <button 
+                    onClick={() => { setFacturasFiltroInicio(''); setFacturasFiltroFin(''); }}
+                    className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-xl font-semibold transition"
+                  >
+                    ✕ Limpiar Fechas
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-800 text-slate-400 uppercase">
@@ -880,32 +929,60 @@ function MainApp() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {facturas.map(f => {
-                    const totalVenta = Number(f.total || 0);
-                    const costoCompra = Number(f.costo_compra || 0);
-                    const utilidad = totalVenta - costoCompra;
+                  {(() => {
+                    // Filtrar por rango de fechas si están definidas
+                    const facturasFiltradas = facturas.filter(f => {
+                      if (facturasFiltroInicio && f.fecha < facturasFiltroInicio) return false;
+                      if (facturasFiltroFin && f.fecha > facturasFiltroFin) return false;
+                      return true;
+                    });
 
-                    return (
-                      <tr key={f.id} className="hover:bg-slate-800/40">
-                        <td className="p-3 font-bold text-indigo-400">{f.numero_factura}</td>
-                        <td className="p-3 text-slate-400">{f.fecha}</td>
-                        <td className="p-3 font-medium text-white">
-                          {f.cliente_nombre}
-                          <span className="block text-[10px] text-indigo-300 font-semibold mt-0.5">👤 Vendedor: {f.usuario_creador || 'Sistema'}</span>
-                        </td>
-                        <td className="p-3 font-extrabold text-white">$ {totalVenta.toLocaleString('es-CO')}</td>
-                        
-                        {!ocultarUtilidad && (
-                          <td className="p-3 font-extrabold text-emerald-400">$ {utilidad.toLocaleString('es-CO')}</td>
-                        )}
+                    // Ordenar según la selección del usuario
+                    const facturasOrdenadas = [...facturasFiltradas].sort((a, b) => {
+                      if (facturasOrdenFecha === 'recientes') {
+                        return new Date(b.fecha) - new Date(a.fecha) || b.id - a.id;
+                      } else {
+                        return new Date(a.fecha) - new Date(b.fecha) || a.id - b.id;
+                      }
+                    });
 
-                        <td className="p-3 text-right space-x-1">
-                          <button onClick={() => setFacturaSeleccionada(f)} className="bg-indigo-600 text-white px-2 py-1 rounded text-[11px]">👁️ Ver</button>
-                          <button onClick={() => setDocumentoImprimir({ tipo: 'FACTURA', data: f })} className="bg-slate-800 text-white px-2 py-1 rounded text-[11px]">🖨️ PDF</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                    if (facturasOrdenadas.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={ocultarUtilidad ? 5 : 6} className="text-center py-8 text-slate-400">
+                            No se encontraron remisiones o ventas en el rango de fechas seleccionado.
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return facturasOrdenadas.map(f => {
+                      const totalVenta = Number(f.total || 0);
+                      const costoCompra = Number(f.costo_compra || 0);
+                      const utilidad = totalVenta - costoCompra;
+
+                      return (
+                        <tr key={f.id} className="hover:bg-slate-800/40">
+                          <td className="p-3 font-bold text-indigo-400">{f.numero_factura}</td>
+                          <td className="p-3 text-slate-400">{f.fecha}</td>
+                          <td className="p-3 font-medium text-white">
+                            {f.cliente_nombre}
+                            <span className="block text-[10px] text-indigo-300 font-semibold mt-0.5">👤 Vendedor: {f.usuario_creador || 'Sistema'}</span>
+                          </td>
+                          <td className="p-3 font-extrabold text-white">$ {totalVenta.toLocaleString('es-CO')}</td>
+                          
+                          {!ocultarUtilidad && (
+                            <td className="p-3 font-extrabold text-emerald-400">$ {utilidad.toLocaleString('es-CO')}</td>
+                          )}
+
+                          <td className="p-3 text-right space-x-1">
+                            <button onClick={() => setFacturaSeleccionada(f)} className="bg-indigo-600 text-white px-2 py-1 rounded text-[11px]">👁️ Ver</button>
+                            <button onClick={() => setDocumentoImprimir({ tipo: 'FACTURA', data: f })} className="bg-slate-800 text-white px-2 py-1 rounded text-[11px]">🖨️ PDF</button>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
                 </tbody>
               </table>
             </div>
