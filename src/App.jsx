@@ -136,13 +136,22 @@ export function AppProvider({ children }) {
     return insertada[0];
   };
 
-  const actualizarOrden = async (id, estado, obs, diag, presupuesto, totalPagar, repuestoCompraId = null, remisionAsociada = null) => {
+  const actualizarOrden = async (id, estado, obs, diag, presupuesto, totalPagar, repuestoCompraId = null, remisionAsociada = null, garantiaAplica = undefined, garantiaTiempo = undefined) => {
     const ordenObj = ordenes.find(o => o.id === id);
     if (!ordenObj) return;
 
     let obsArr = Array.isArray(ordenObj.observaciones) ? [...ordenObj.observaciones] : [];
     if (obs && obs.trim()) {
       obsArr.push({ fecha: new Date().toLocaleString('es-CO'), texto: obs.trim() });
+    }
+    // Registro interno de garantía dentro del JSON existente observaciones.
+    // Se reemplaza solo este registro, sin borrar el historial de avances.
+    if (garantiaAplica !== undefined || garantiaTiempo !== undefined) {
+      const garantiaAnterior = obtenerGarantiaOrden(ordenObj);
+      obsArr = obsArr.filter(item => !item || item._tipo !== 'garantia');
+      const aplicaFinal = garantiaAplica !== undefined ? !!garantiaAplica : garantiaAnterior.aplica;
+      const tiempoFinal = garantiaTiempo !== undefined ? String(garantiaTiempo || '') : garantiaAnterior.tiempo;
+      obsArr.push({ _tipo: 'garantia', aplica: aplicaFinal, tiempo: aplicaFinal ? tiempoFinal : '' });
     }
 
     const updateData = {
@@ -184,7 +193,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  const remisionarOrden = async (orden, nombreUsuario, itemCompraSeleccionado = null) => {
+  const remisionarOrden = async (orden, nombreUsuario, itemCompraSeleccionado = null, garantiaAplica = undefined, garantiaTiempo = undefined) => {
     const cliEncontrado = clientes.find(c => c.nombre.toLowerCase() === orden.cliente_nombre.toLowerCase());
     const telCliente = cliEncontrado ? cliEncontrado.telefono : (orden.cliente_telefono || 'N/A');
     
@@ -215,6 +224,13 @@ export function AppProvider({ children }) {
 
     const totalFinalFac = valorCobro + (compraElegida ? (Number(compraElegida.precio_venta_sugerido) || 0) : 0);
 
+    const garantiaOrden = obtenerGarantiaOrden(orden);
+    const aplicaGarantiaFinal = garantiaAplica !== undefined ? !!garantiaAplica : garantiaOrden.aplica;
+    const tiempoGarantiaFinal = garantiaTiempo !== undefined ? String(garantiaTiempo || '') : garantiaOrden.tiempo;
+    if (aplicaGarantiaFinal) {
+      itemsRemision.push({ _tipo: 'garantia', aplica: true, tiempo: tiempoGarantiaFinal });
+    }
+
     const nuevaFac = {
       numero_factura: numRemisionGenerado,
       cliente_nombre: orden.cliente_nombre,
@@ -239,12 +255,17 @@ export function AppProvider({ children }) {
     }
   };
 
-  const agregarVentaDirecta = async (clienteObj, itemsArray, totalCalculado, costoCompraTotal, nombreUsuario) => {
+  const agregarVentaDirecta = async (clienteObj, itemsArray, totalCalculado, costoCompraTotal, nombreUsuario, garantiaAplica = false, garantiaTiempo = '') => {
     const nombreCliente = clienteObj ? clienteObj.nombre : 'Cliente Mostrador';
     const telefonoCliente = clienteObj ? (clienteObj.telefono || 'N/A') : 'N/A';
     
     const consecutivoNum = 10001 + facturas.length;
     const numRemisionGenerado = `REM-${consecutivoNum}`;
+
+    const itemsConGarantia = [...itemsArray];
+    if (garantiaAplica) {
+      itemsConGarantia.push({ _tipo: 'garantia', aplica: true, tiempo: String(garantiaTiempo || '') });
+    }
 
     const nuevaFac = {
       numero_factura: numRemisionGenerado,
@@ -255,7 +276,7 @@ export function AppProvider({ children }) {
       costo_compra: costoCompraTotal || 0,
       tipo: 'Venta de Repuestos',
       usuario_creador: nombreUsuario || 'Sistema',
-      items: itemsArray
+      items: itemsConGarantia
     };
 
     const { data: insertada, error } = await supabase.from('facturas').insert([nuevaFac]).select();
@@ -322,6 +343,25 @@ export function AppProvider({ children }) {
 }
 
 const useApp = () => useContext(AppContext);
+
+// La garantía se guarda dentro de campos JSON que ya existen en Supabase.
+// Así no se agregan ni modifican columnas de la base de datos.
+const CONDICIONES_GARANTIA = 'Para efectos de Garantía se necesita copia de la facrura y la mercancia con todos los accesorios y empaques originales, no se dara garantia por daños ocacionados por alto voltaje, golpes, deterioro o desconfiguracion de la maquina, software, virus o por levantar los sellos de seguridad. la garantia es directamente con el centro de servicio o en el almacen. por ninguna excepcion se hace servicio a domicilio.';
+
+const obtenerGarantiaOrden = (orden) => {
+  const registro = (Array.isArray(orden?.observaciones) ? orden.observaciones : [])
+    .find(item => item && item._tipo === 'garantia');
+  return { aplica: !!registro?.aplica, tiempo: registro?.tiempo || '' };
+};
+
+const obtenerGarantiaFactura = (factura) => {
+  const registro = (Array.isArray(factura?.items) ? factura.items : [])
+    .find(item => item && item._tipo === 'garantia');
+  return { aplica: !!registro?.aplica, tiempo: registro?.tiempo || '' };
+};
+
+const esRegistroGarantia = (item) => !!item && item._tipo === 'garantia';
+
 
 function LoginScreen() {
   const { login, empresa } = useApp();
@@ -401,16 +441,14 @@ function MainApp() {
     tipo: 'AMBOS'
   });
 
-  // Estados para búsqueda y ordenamiento en Remisiones y Ventas
+  // Estados nuevos para búsqueda y ordenamiento por fecha en Remisiones y Ventas
   const [facturasFiltroInicio, setFacturasFiltroInicio] = useState('');
   const [facturasFiltroFin, setFacturasFiltroFin] = useState('');
   const [facturasOrdenFecha, setFacturasOrdenFecha] = useState('recientes'); // 'recientes' o 'antiguas'
-
-  // Estados nuevos para búsqueda, rango de fechas y ordenamiento en Reparaciones y Estado (Órdenes)
-  const [ordenesBusquedaTexto, setOrdenesBusquedaTexto] = useState('');
+  const [ordenesBusqueda, setOrdenesBusqueda] = useState('');
   const [ordenesFiltroInicio, setOrdenesFiltroInicio] = useState('');
   const [ordenesFiltroFin, setOrdenesFiltroFin] = useState('');
-  const [ordenesOrdenFecha, setOrdenesOrdenFecha] = useState('antiguas'); // 'antiguas' (más antiguo al más actual por defecto o recientes)
+  const [ordenesOrdenFecha, setOrdenesOrdenFecha] = useState('recientes');
 
   const [tipoClienteOpt, setTipoClienteOpt] = useState('EXISTENTE');
   const [busquedaCliente, setBusquedaCliente] = useState('');
@@ -438,6 +476,8 @@ function MainApp() {
   const [formNuevoClienteVenta, setFormNuevoClienteVenta] = useState({ nombre: '', telefono: '', cedula: '', email: '', direccion: '' });
   const [itemsVenta, setItemsVenta] = useState([{ descripcion: '', cantidad: 1, precio: 0 }]);
   const [compraSeleccionadaVentaId, setCompraSeleccionadaVentaId] = useState('');
+  const [garantiaVentaAplica, setGarantiaVentaAplica] = useState(false);
+  const [garantiaVentaTiempo, setGarantiaVentaTiempo] = useState('');
 
   const [formCompra, setFormCompra] = useState({ proveedor: '', descripcion_producto: '', costo: 0, precio_venta_sugerido: 0 });
   const [mostrarHistorialPortal, setMostrarHistorialPortal] = useState(false);
@@ -450,6 +490,24 @@ function MainApp() {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+
+  const ordenesFiltradas = [...ordenes].filter(o => {
+    const fechaRegistro = String(o.created_at || o.fecha || '').slice(0, 10);
+    if (ordenesFiltroInicio && fechaRegistro && fechaRegistro < ordenesFiltroInicio) return false;
+    if (ordenesFiltroFin && fechaRegistro && fechaRegistro > ordenesFiltroFin) return false;
+    const termino = normalizarBusqueda(ordenesBusqueda);
+    if (!termino) return true;
+    const cliente = clientes.find(c => normalizarBusqueda(c.nombre) === normalizarBusqueda(o.cliente_nombre));
+    return normalizarBusqueda(o.cliente_nombre).includes(termino) ||
+      normalizarBusqueda(o.cliente_telefono).includes(termino) ||
+      normalizarBusqueda(cliente?.cedula).includes(termino);
+  }).sort((a, b) => {
+    const fechaA = new Date(a.created_at || a.fecha || 0).getTime() || 0;
+    const fechaB = new Date(b.created_at || b.fecha || 0).getTime() || 0;
+    return ordenesOrdenFecha === 'recientes'
+      ? (fechaB - fechaA || Number(b.id || 0) - Number(a.id || 0))
+      : (fechaA - fechaB || Number(a.id || 0) - Number(b.id || 0));
+  });
 
   const terminoBusquedaDirectorio = normalizarBusqueda(busquedaDirectorioClientes);
   const clientesFiltradosDirectorio = clientes.filter(c => {
@@ -573,7 +631,7 @@ function MainApp() {
           </div>
 
           <nav className="space-y-1.5 text-xs font-semibold">
-            {permisos.crear_orden && <button onClick={() => setTab('nueva_orden')} className={`w-full text-left p-3 rounded-xl transition ${tab === 'nueva_orden' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:bg-slate-800'}`}>➕ Nueva Orden de Entrada</button>}
+            {permisos.crear_orden && <button onClick={() => setTab('nueva_orden')} className={`w-full text-left p-3 rounded-xl transition ${tab === 'nueva_orden' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:bg-slate-800'}`}>➕ Orden de Entrada/Taller</button>}
             <button onClick={() => setTab('ordenes')} className={`w-full text-left p-3 rounded-xl transition ${tab === 'ordenes' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:bg-slate-800'}`}>🛠️ Reparaciones y Estado</button>
             {permisos.ver_clientes && <button onClick={() => setTab('clientes')} className={`w-full text-left p-3 rounded-xl transition ${tab === 'clientes' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:bg-slate-800'}`}>👥 Directorio de Clientes</button>}
             {permisos.facturar && <button onClick={() => setTab('facturacion')} className={`w-full text-left p-3 rounded-xl transition ${tab === 'facturacion' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'text-slate-400 hover:bg-slate-800'}`}>🧾 Remisiones y Ventas</button>}
@@ -736,158 +794,76 @@ function MainApp() {
         {tab === 'ordenes' && (
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
             <h2 className="text-xl font-bold text-white">Seguimiento de Reparaciones</h2>
-            
-            {/* CONTROLES DE BÚSQUEDA, RANGO DE FECHAS Y ORDENAMIENTO EN REPARACIONES */}
-            <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/80 flex flex-wrap gap-3 items-end text-xs">
-              <div className="flex-1 min-w-[220px]">
-                <label className="text-slate-400 block mb-1 font-semibold">🔍 Buscar (Nombre, Cédula, Teléfono, Código)</label>
-                <input 
-                  type="text" 
-                  className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white placeholder-slate-500"
-                  placeholder="Ej. Juan Pérez, Cédula, Celular, TK-..."
-                  value={ordenesBusquedaTexto}
-                  onChange={e => setOrdenesBusquedaTexto(e.target.value)}
-                />
+            <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/80 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 items-end text-xs">
+              <div className="lg:col-span-2">
+                <label className="text-slate-400 block mb-1 font-semibold">🔍 Buscar nombre, cédula o celular</label>
+                <input value={ordenesBusqueda} onChange={e => setOrdenesBusqueda(e.target.value)} placeholder="Nombre, cédula o celular..." className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white" />
               </div>
               <div>
-                <label className="text-slate-400 block mb-1 font-semibold">🔍 Desde la fecha</label>
-                <input 
-                  type="date" 
-                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white"
-                  value={ordenesFiltroInicio}
-                  onChange={e => setOrdenesFiltroInicio(e.target.value)}
-                />
+                <label className="text-slate-400 block mb-1 font-semibold">Desde</label>
+                <input type="date" value={ordenesFiltroInicio} onChange={e => setOrdenesFiltroInicio(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white" />
               </div>
               <div>
-                <label className="text-slate-400 block mb-1 font-semibold">🔍 Hasta la fecha</label>
-                <input 
-                  type="date" 
-                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white"
-                  value={ordenesFiltroFin}
-                  onChange={e => setOrdenesFiltroFin(e.target.value)}
-                />
+                <label className="text-slate-400 block mb-1 font-semibold">Hasta</label>
+                <input type="date" value={ordenesFiltroFin} onChange={e => setOrdenesFiltroFin(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white" />
               </div>
               <div>
-                <label className="text-slate-400 block mb-1 font-semibold">⚡ Ordenar por Fecha</label>
-                <select 
-                  className="bg-slate-800 border border-slate-700 p-2 rounded-xl text-white font-bold"
-                  value={ordenesOrdenFecha}
-                  onChange={e => setOrdenesOrdenFecha(e.target.value)}
-                >
-                  <option value="antiguas">Más antiguo al más actual</option>
+                <label className="text-slate-400 block mb-1 font-semibold">Orden por fecha</label>
+                <select value={ordenesOrdenFecha} onChange={e => setOrdenesOrdenFecha(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white">
                   <option value="recientes">Más recientes primero</option>
+                  <option value="antiguas">Más antiguas primero</option>
                 </select>
               </div>
-              {(ordenesBusquedaTexto || ordenesFiltroInicio || ordenesFiltroFin) && (
-                <div>
-                  <button 
-                    onClick={() => { setOrdenesBusquedaTexto(''); setOrdenesFiltroInicio(''); setOrdenesFiltroFin(''); }}
-                    className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-xl font-semibold transition"
-                  >
-                    ✕ Limpiar Filtros
-                  </button>
-                </div>
-              )}
+              <div className="lg:col-span-5 flex items-center justify-between gap-2">
+                <span className="text-slate-500">{ordenesFiltradas.length} de {ordenes.length} órdenes</span>
+                <button onClick={() => { setOrdenesBusqueda(''); setOrdenesFiltroInicio(''); setOrdenesFiltroFin(''); setOrdenesOrdenFecha('recientes'); }} className="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-xl font-semibold">✕ Limpiar filtros</button>
+              </div>
             </div>
-
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-800 text-slate-400 uppercase">
                   <tr><th className="p-3">ID Registro</th><th className="p-3">Código Cliente</th><th className="p-3">Cliente / Atendió</th><th className="p-3">Equipo & Accesorios</th><th className="p-3">Estado</th><th className="p-3">Presupuesto / Total Pagar</th><th className="p-3 text-right">Acciones</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {(() => {
-                    const terminoBusq = normalizarBusqueda(ordenesBusquedaTexto);
-
-                    const ordenesFiltradas = ordenes.filter(o => {
-                      // 1. Búsqueda por texto (Nombre, Teléfono, Código de seguimiento o Cédula del cliente)
-                      if (terminoBusq) {
-                        const nombre = normalizarBusqueda(o.cliente_nombre);
-                        const telefono = normalizarBusqueda(o.cliente_telefono);
-                        const codigo = normalizarBusqueda(o.codigo_seguimiento);
-                        
-                        // Buscar cédula en el directorio de clientes
-                        const clienteEncontrado = clientes.find(c => normalizarBusqueda(c.nombre) === normalizarBusqueda(o.cliente_nombre));
-                        const cedula = normalizarBusqueda(clienteEncontrado?.cedula);
-
-                        const coincideTexto = nombre.includes(terminoBusq) ||
-                                              telefono.includes(terminoBusq) ||
-                                              codigo.includes(terminoBusq) ||
-                                              cedula.includes(terminoBusq);
-                        if (!coincideTexto) return false;
-                      }
-
-                      // 2. Filtro por rango de fechas (usando created_at o fecha)
-                      const fechaOrden = o.created_at ? o.created_at.split('T')[0] : (o.fecha || '');
-                      if (fechaOrden) {
-                        if (ordenesFiltroInicio && fechaOrden < ordenesFiltroInicio) return false;
-                        if (ordenesFiltroFin && fechaOrden > ordenesFiltroFin) return false;
-                      }
-
-                      return true;
-                    });
-
-                    // Ordenar según lo que el usuario elija
-                    const ordenesOrdenadas = [...ordenesFiltradas].sort((a, b) => {
-                      if (ordenesOrdenFecha === 'recientes') {
-                        return (b.id - a.id);
-                      } else {
-                        return (a.id - b.id); // Más antiguo al más actual
-                      }
-                    });
-
-                    if (ordenesOrdenadas.length === 0) {
-                      return (
-                        <tr>
-                          <td colSpan="7" className="text-center py-8 text-slate-400">
-                            No se encontraron órdenes con los filtros seleccionados.
-                          </td>
-                        </tr>
-                      );
-                    }
-
-                    return ordenesOrdenadas.map((o) => {
-                      // Obtener índice original fijo para el ID de registro consecutivo
-                      const originalIndex = ordenes.findIndex(item => item.id === o.id);
-                      const idRegistroConsecutivo = `#${1001 + originalIndex}`;
-
-                      return (
-                        <tr key={o.id} className="hover:bg-slate-800/40">
-                          <td className="p-3 font-bold text-indigo-400">{idRegistroConsecutivo}</td>
-                          <td className="p-3 font-mono text-xs text-amber-400 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-800/40">{o.codigo_seguimiento}</td>
-                          <td className="p-3 font-medium text-white">
-                            {o.cliente_nombre}
-                            <span className="block text-[10px] text-slate-500">{o.cliente_telefono}</span>
-                            <span className="block text-[10px] text-indigo-300 font-semibold mt-0.5">👤 Atendió: {o.usuario_creador || 'Sistema'}</span>
-                          </td>
-                          <td className="p-3">
-                            <p className="font-bold text-white">{o.tipo_equipo} {o.marca_modelo}</p>
-                            <p className="text-[10px] text-slate-400">S/N: {o.serie || 'N/A'}</p>
-                            <div className="flex gap-2 mt-1 text-[10px]">
-                              {o.deja_cargador && <span className="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800">🔌 Cargador</span>}
-                              {o.deja_bateria && <span className="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800">🔋 Batería {o.serie_bateria ? `(${o.serie_bateria})` : ''}</span>}
-                            </div>
-                          </td>
-                          <td className="p-3"><span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">{o.estado}</span></td>
-                          <td className="p-3 font-bold text-white">
-                            <div className="space-y-0.5">
-                              <span className="text-slate-400 text-[11px] block">Presupuesto: {o.valor_estimado ? `$ ${Number(o.valor_estimado).toLocaleString('es-CO')}` : '-'}</span>
-                              <span className="text-emerald-400 text-[11px] block">Total Pagar: {o.total_pagar ? `$ ${Number(o.total_pagar).toLocaleString('es-CO')}` : '-'}</span>
-                            </div>
-                            {o.numero_factura_asociada && (
-                              <span className="block text-[11px] text-indigo-400 font-mono mt-1">Remisión: {o.numero_factura_asociada}</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-right space-x-1">
-                            {permisos.editar_diagnostico && <button onClick={() => { setModalEditOrden(o); setEditOrdForm({ estado: o.estado, observacion: '', diagnostico: o.diagnostico || '', presupuesto: o.valor_estimado || 0, totalPagar: o.total_pagar || 0, repuestoCompraId: o.repuesto_compra_id || '' }); }} className="bg-indigo-600 text-white px-2 py-1 rounded text-[11px]">✏️ Diagnóstico</button>}
-                            <button onClick={() => enviarWhatsApp(o, idRegistroConsecutivo)} className="bg-emerald-600 text-white px-2 py-1 rounded text-[11px]">💬 WhatsApp</button>
-                            <button onClick={() => setDocumentoImprimir({ tipo: 'ORDEN', data: o, idConsecutivo: idRegistroConsecutivo })} className="bg-slate-800 text-white px-2 py-1 rounded text-[11px]">🖨️ PDF</button>
-                            {o.estado === 'Reparado / Listo' && permisos.facturar && <button onClick={() => setModalRemisionarOrden({ orden: o, compraId: o.repuesto_compra_id || '' })} className="bg-emerald-500 text-white px-2 py-1 rounded text-[11px] font-bold">📄 Remisionar</button>}
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
+                  {ordenesFiltradas.map((o) => {
+                    const indiceOriginal = ordenes.findIndex(registro => registro.id === o.id);
+                    const idRegistroConsecutivo = `#${1001 + (ordenes.length - 1 - Math.max(indiceOriginal, 0))}`;
+                    return (
+                      <tr key={o.id} className="hover:bg-slate-800/40">
+                        <td className="p-3 font-bold text-indigo-400">{idRegistroConsecutivo}</td>
+                        <td className="p-3 font-mono text-xs text-amber-400 bg-amber-950/30 px-2 py-0.5 rounded border border-amber-800/40">{o.codigo_seguimiento}</td>
+                        <td className="p-3 font-medium text-white">
+                          {o.cliente_nombre}
+                          <span className="block text-[10px] text-slate-500">{o.cliente_telefono}</span>
+                          <span className="block text-[10px] text-indigo-300 font-semibold mt-0.5">👤 Atendió: {o.usuario_creador || 'Sistema'}</span>
+                        </td>
+                        <td className="p-3">
+                          <p className="font-bold text-white">{o.tipo_equipo} {o.marca_modelo}</p>
+                          <p className="text-[10px] text-slate-400">S/N: {o.serie || 'N/A'}</p>
+                          <div className="flex gap-2 mt-1 text-[10px]">
+                            {o.deja_cargador && <span className="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800">🔌 Cargador</span>}
+                            {o.deja_bateria && <span className="bg-indigo-950 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800">🔋 Batería {o.serie_bateria ? `(${o.serie_bateria})` : ''}</span>}
+                          </div>
+                        </td>
+                        <td className="p-3"><span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">{o.estado}</span></td>
+                        <td className="p-3 font-bold text-white">
+                          <div className="space-y-0.5">
+                            <span className="text-slate-400 text-[11px] block">Presupuesto: {o.valor_estimado ? `$ ${Number(o.valor_estimado).toLocaleString('es-CO')}` : '-'}</span>
+                            <span className="text-emerald-400 text-[11px] block">Total Pagar: {o.total_pagar ? `$ ${Number(o.total_pagar).toLocaleString('es-CO')}` : '-'}</span>
+                          </div>
+                          {o.numero_factura_asociada && (
+                            <span className="block text-[11px] text-indigo-400 font-mono mt-1">Remisión: {o.numero_factura_asociada}</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right space-x-1">
+                          {permisos.editar_diagnostico && <button onClick={() => { setModalEditOrden(o); setEditOrdForm({ estado: o.estado, observacion: '', diagnostico: o.diagnostico || '', presupuesto: o.valor_estimado || 0, totalPagar: o.total_pagar || 0, repuestoCompraId: o.repuesto_compra_id || '', garantiaAplica: obtenerGarantiaOrden(o).aplica, garantiaTiempo: obtenerGarantiaOrden(o).tiempo }); }} className="bg-indigo-600 text-white px-2 py-1 rounded text-[11px]">✏️ Diagnóstico</button>}
+                          <button onClick={() => enviarWhatsApp(o, idRegistroConsecutivo)} className="bg-emerald-600 text-white px-2 py-1 rounded text-[11px]">💬 WhatsApp</button>
+                          <button onClick={() => setDocumentoImprimir({ tipo: 'ORDEN', data: o, idConsecutivo: idRegistroConsecutivo })} className="bg-slate-800 text-white px-2 py-1 rounded text-[11px]">🖨️ PDF</button>
+                          {o.estado === 'Reparado / Listo' && permisos.facturar && <button onClick={() => setModalRemisionarOrden({ orden: o, compraId: o.repuesto_compra_id || '', garantiaAplica: obtenerGarantiaOrden(o).aplica, garantiaTiempo: obtenerGarantiaOrden(o).tiempo })} className="bg-emerald-500 text-white px-2 py-1 rounded text-[11px] font-bold">📄 Remisionar</button>}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -983,7 +959,7 @@ function MainApp() {
                   {ocultarUtilidad ? '🔒 Utilidad Oculta' : '👁️ Ocultar Utilidad'}
                 </button>
                 <button onClick={() => setModalReporteExcel(true)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-xl text-xs font-bold transition">📊 Descargar Reporte Excel</button>
-                <button onClick={() => { setModalVenta(true); setTipoClienteVentaOpt('EXISTENTE'); setClienteVentaSeleccionado(null); setCompraSeleccionadaVentaId(''); }} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold">+ Venta Directa</button>
+                <button onClick={() => { setModalVenta(true); setTipoClienteVentaOpt('EXISTENTE'); setClienteVentaSeleccionado(null); setCompraSeleccionadaVentaId(''); setGarantiaVentaAplica(false); setGarantiaVentaTiempo(''); }} className="bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold">+ Venta Directa</button>
               </div>
             </div>
 
@@ -1044,13 +1020,14 @@ function MainApp() {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {(() => {
+                    // Filtrar por rango de fechas si están definidas
                     const facturasFiltradas = facturas.filter(f => {
-                      const fechaF = f.fecha; 
-                      if (facturasFiltroInicio && fechaF < facturasFiltroInicio) return false;
-                      if (facturasFiltroFin && fechaF > facturasFiltroFin) return false;
+                      if (facturasFiltroInicio && f.fecha < facturasFiltroInicio) return false;
+                      if (facturasFiltroFin && f.fecha > facturasFiltroFin) return false;
                       return true;
                     });
 
+                    // Ordenar según la selección del usuario
                     const facturasOrdenadas = [...facturasFiltradas].sort((a, b) => {
                       if (facturasOrdenFecha === 'recientes') {
                         return new Date(b.fecha) - new Date(a.fecha) || b.id - a.id;
@@ -1195,7 +1172,7 @@ function MainApp() {
                   {mostrarHistorialPortal && (
                     <div className="mt-2 space-y-1.5 p-3 bg-slate-900/90 rounded-xl border border-slate-800">
                       {(Array.isArray(clienteSeleccionado.observaciones) ? clienteSeleccionado.observaciones : []).length > 0 ? (
-                        clienteSeleccionado.observaciones.map((obs, idx) => (
+                        clienteSeleccionado.observaciones.filter(obs => !obs || obs._tipo !== 'garantia').map((obs, idx) => (
                           <p key={idx} className="text-[11px] text-slate-300">🔹 <span className="text-slate-500 font-mono">[{obs.fecha}]</span> {obs.texto}</p>
                         ))
                       ) : (
@@ -1355,8 +1332,8 @@ function MainApp() {
             
             <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700 max-h-36 overflow-y-auto space-y-1 text-xs">
               <p className="font-bold text-indigo-400">Historial de Avances Anteriores:</p>
-              {(Array.isArray(modalEditOrden.observaciones) ? modalEditOrden.observaciones : []).length > 0 ? (
-                modalEditOrden.observaciones.map((obs, idx) => (
+              {(Array.isArray(modalEditOrden.observaciones) ? modalEditOrden.observaciones.filter(obs => !obs || obs._tipo !== 'garantia') : []).length > 0 ? (
+                modalEditOrden.observaciones.filter(obs => !obs || obs._tipo !== 'garantia').map((obs, idx) => (
                   <p key={idx} className="text-slate-300">▪️ <span className="text-slate-500">[{obs.fecha}]</span> {obs.texto}</p>
                 ))
               ) : (
@@ -1373,6 +1350,19 @@ function MainApp() {
                 <option value="Reparado / Listo">Reparado / Listo</option>
                 <option value="Entregado / Remisionado">Entregado / Remisionado</option>
               </select>
+            </div>
+
+            <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700 space-y-2">
+              <label className="flex items-center gap-2 text-xs font-bold text-emerald-400 cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 accent-emerald-600" checked={!!editOrdForm.garantiaAplica} onChange={e => setEditOrdForm({ ...editOrdForm, garantiaAplica: e.target.checked, garantiaTiempo: e.target.checked ? (editOrdForm.garantiaTiempo || '') : '' })} />
+                ✓ ¿Esta reparación tiene garantía?
+              </label>
+              {editOrdForm.garantiaAplica && (
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">Tiempo de garantía</label>
+                  <input value={editOrdForm.garantiaTiempo || ''} onChange={e => setEditOrdForm({ ...editOrdForm, garantiaTiempo: e.target.value })} placeholder="Ej. 30 días, 3 meses, 1 año" className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs text-white" />
+                </div>
+              )}
             </div>
 
             <div>
@@ -1412,8 +1402,9 @@ function MainApp() {
 
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={() => setModalEditOrden(null)} className="text-xs text-slate-400 px-3">Cancelar</button>
-              <button onClick={async () => { 
-                await actualizarOrden(modalEditOrden.id, editOrdForm.estado, editOrdForm.observacion, editOrdForm.diagnostico, editOrdForm.presupuesto, editOrdForm.totalPagar, editOrdForm.repuestoCompraId); 
+              <button onClick={async () => {
+                if (editOrdForm.garantiaAplica && !String(editOrdForm.garantiaTiempo || '').trim()) return alert('Escribe el tiempo de garantía o desmarca la casilla.');
+                await actualizarOrden(modalEditOrden.id, editOrdForm.estado, editOrdForm.observacion, editOrdForm.diagnostico, editOrdForm.presupuesto, editOrdForm.totalPagar, editOrdForm.repuestoCompraId, null, editOrdForm.garantiaAplica, editOrdForm.garantiaTiempo);
                 setModalEditOrden(null); 
               }} className="bg-indigo-600 text-white px-4 py-1.5 rounded-xl text-xs font-bold">Guardar Cambios</button>
             </div>
@@ -1562,6 +1553,19 @@ function MainApp() {
               <button type="button" onClick={() => setItemsVenta([...itemsVenta, { descripcion: '', cantidad: 1, precio: 0 }])} className="text-xs text-indigo-400 font-bold hover:underline">+ Añadir otro ítem</button>
             </div>
 
+            <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700 space-y-2">
+              <label className="flex items-center gap-2 text-xs font-bold text-emerald-400 cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 accent-emerald-600" checked={garantiaVentaAplica} onChange={e => { setGarantiaVentaAplica(e.target.checked); if (!e.target.checked) setGarantiaVentaTiempo(''); }} />
+                ✓ ¿Esta venta tiene garantía?
+              </label>
+              {garantiaVentaAplica && (
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">Tiempo de garantía</label>
+                  <input value={garantiaVentaTiempo} onChange={e => setGarantiaVentaTiempo(e.target.value)} placeholder="Ej. 30 días, 3 meses, 1 año" className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs text-white" />
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-between items-center pt-2 border-t border-slate-800">
               <span className="font-bold text-xs text-white">Total a Pagar Cliente:</span>
               <span className="font-extrabold text-emerald-400 text-base">$ {itemsVenta.reduce((acc, i) => acc + (i.cantidad * i.precio), 0).toLocaleString('es-CO')}</span>
@@ -1578,6 +1582,7 @@ function MainApp() {
                   clienteFinalObj = await agregarCliente(formNuevoClienteVenta);
                 }
 
+                if (garantiaVentaAplica && !String(garantiaVentaTiempo || '').trim()) return alert('Escribe el tiempo de garantía o desmarca la casilla.');
                 const total = itemsVenta.reduce((acc, i) => acc + (i.cantidad * i.precio), 0);
                 if (total <= 0) return alert('Ingresa ítems con precio mayor a 0');
 
@@ -1588,7 +1593,7 @@ function MainApp() {
                 }
                 
                 const nombreUsrActual = usuarioSesion ? usuarioSesion.nombre : 'Admin';
-                const fac = await agregarVentaDirecta(clienteFinalObj, itemsVenta, total, costoCompraTotal, nombreUsrActual);
+                const fac = await agregarVentaDirecta(clienteFinalObj, itemsVenta, total, costoCompraTotal, nombreUsrActual, garantiaVentaAplica, garantiaVentaTiempo);
                 setModalVenta(false);
                 if(fac) {
                   alert('¡Remisión creada con éxito!');
@@ -1606,6 +1611,19 @@ function MainApp() {
             <h3 className="font-bold text-white text-base">Remisionar Orden</h3>
             <p className="text-xs text-slate-400">Cliente: <strong className="text-white">{modalRemisionarOrden.orden.cliente_nombre}</strong></p>
             
+            <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700 space-y-2">
+              <label className="flex items-center gap-2 text-xs font-bold text-emerald-400 cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 accent-emerald-600" checked={!!modalRemisionarOrden.garantiaAplica} onChange={e => setModalRemisionarOrden({ ...modalRemisionarOrden, garantiaAplica: e.target.checked, garantiaTiempo: e.target.checked ? (modalRemisionarOrden.garantiaTiempo || '') : '' })} />
+                ✓ ¿La remisión tiene garantía?
+              </label>
+              {modalRemisionarOrden.garantiaAplica && (
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">Tiempo de garantía</label>
+                  <input value={modalRemisionarOrden.garantiaTiempo || ''} onChange={e => setModalRemisionarOrden({ ...modalRemisionarOrden, garantiaTiempo: e.target.value })} placeholder="Ej. 30 días, 3 meses, 1 año" className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-xs text-white" />
+                </div>
+              )}
+            </div>
+
             <div className="space-y-2 pt-2">
               <label className="text-xs font-bold text-amber-400 block">🛒 ¿Incluir algún repuesto/producto de Compras?</label>
               <select 
@@ -1624,13 +1642,14 @@ function MainApp() {
             <div className="flex justify-end gap-2 pt-3">
               <button onClick={() => setModalRemisionarOrden(null)} className="text-xs text-slate-400 px-3 py-1">Cancelar</button>
               <button onClick={async () => {
+                if (modalRemisionarOrden.garantiaAplica && !String(modalRemisionarOrden.garantiaTiempo || '').trim()) return alert('Escribe el tiempo de garantía o desmarca la casilla.');
                 const nombreUsrActual = usuarioSesion ? usuarioSesion.nombre : 'Admin';
                 let itemCompraObj = null;
                 if (modalRemisionarOrden.compraId) {
                   itemCompraObj = compras.find(c => c.id.toString() === modalRemisionarOrden.compraId.toString());
                 }
 
-                const fac = await remisionarOrden(modalRemisionarOrden.orden, nombreUsrActual, itemCompraObj);
+                const fac = await remisionarOrden(modalRemisionarOrden.orden, nombreUsrActual, itemCompraObj, modalRemisionarOrden.garantiaAplica, modalRemisionarOrden.garantiaTiempo);
                 setModalRemisionarOrden(null);
                 if(fac){
                   alert('¡Remisión Generada Correctamente!');
@@ -1735,7 +1754,7 @@ function MainApp() {
                   <tr><th className="p-2">Ítem / Descripción</th><th className="p-2 text-center">Cant.</th><th className="p-2 text-right">Precio</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {(facturaSeleccionada.items || []).map((it, idx) => (
+                  {(facturaSeleccionada.items || []).filter(it => !esRegistroGarantia(it)).map((it, idx) => (
                     <tr key={idx}>
                       <td className="p-2 text-[11px]">{it.descripcion}</td>
                       <td className="p-2 text-center text-[11px]">{it.cantidad}</td>
@@ -1807,6 +1826,13 @@ function MainApp() {
                 </div>
               )}
 
+              {documentoImprimir.tipo === 'ORDEN' && obtenerGarantiaOrden(documentoImprimir.data).aplica && (
+                <div className="mt-1.5 pt-1.5 border-t border-dashed border-slate-300 text-sm">
+                  <p><strong>Garantía:</strong> {obtenerGarantiaOrden(documentoImprimir.data).tiempo || 'Tiempo no especificado'}</p>
+                  <p className="text-[10px] leading-tight mt-1">{CONDICIONES_GARANTIA}</p>
+                </div>
+              )}
+
               {documentoImprimir.tipo === 'FACTURA' && (
                 <div className="space-y-1.5 text-base">
                   <div className="flex justify-between text-lg">
@@ -1823,23 +1849,30 @@ function MainApp() {
                       <tr><th className="p-1.5 border">Descripción</th><th className="p-1.5 text-center border">Cant.</th><th className="p-1.5 text-right border">Precio</th></tr>
                     </thead>
                     <tbody>
-                      {(documentoImprimir.data.items || []).map((it, idx) => (
+                      {(documentoImprimir.data.items || []).filter(it => !esRegistroGarantia(it)).map((it, idx) => (
                         <tr key={idx}><td className="p-1.5 border">{it.descripcion}</td><td className="p-1.5 text-center border">{it.cantidad}</td><td className="p-1.5 text-right border">$ {(it.precio || 0).toLocaleString('es-CO')}</td></tr>
                       ))}
                     </tbody>
                   </table>
                   <p className="font-black text-emerald-700 text-xl text-right mt-1">Total a Pagar: $ {(documentoImprimir.data.total || 0).toLocaleString('es-CO')}</p>
 
-                  <div className="mt-1.5 pt-1.5 border-t border-dashed border-slate-300 grid grid-cols-2 gap-3 text-sm">
-                    <div className="border border-slate-300 p-2 rounded h-14 flex flex-col justify-between">
-                      <span className="font-bold text-slate-600 uppercase text-xs">Garantía:</span>
-                      <div className="border-b border-dotted border-slate-400 w-full mb-1"></div>
-                      <div className="border-b border-dotted border-slate-400 w-full"></div>
-                    </div>
-                    <div className="border border-slate-300 p-2 rounded h-14 flex flex-col items-center justify-end text-center">
-                      <span className="text-xs text-slate-400 font-bold uppercase">Sello / Firma</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const garantia = obtenerGarantiaFactura(documentoImprimir.data);
+                    return (
+                      <div className="mt-1.5 pt-1.5 border-t border-dashed border-slate-300 text-sm">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="border border-slate-300 p-2 rounded min-h-14 flex flex-col justify-between">
+                            <span className="font-bold text-slate-600 uppercase text-xs">Garantía:</span>
+                            <span className="font-bold">{garantia.aplica ? (garantia.tiempo || 'Tiempo no especificado') : 'No aplica'}</span>
+                          </div>
+                          <div className="border border-slate-300 p-2 rounded min-h-14 flex flex-col items-center justify-end text-center">
+                            <span className="text-xs text-slate-400 font-bold uppercase">Sello / Firma</span>
+                          </div>
+                        </div>
+                        {garantia.aplica && <p className="text-[10px] leading-tight mt-2">{CONDICIONES_GARANTIA}</p>}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -1853,6 +1886,7 @@ function MainApp() {
                   const nombreClienteLimpio = (doc.cliente_nombre || 'Cliente').replace(/[^a-zA-Z0-9]/g, '_');
                   const telefonoLimpio = (doc.cliente_telefono || '0000000000').replace(/[^a-zA-Z0-9]/g, '');
                   
+                  // Nombre del archivo estructurado con número, cliente y celular
                   const elHtml = document.getElementById('seccion-impresion').innerHTML;
                   const blob = new Blob([`<html><head><title>Comprobante</title><style>body{font-family:sans-serif;padding:20px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #ccc;padding:8px;}</style></head><body>${elHtml}</body></html>`], { type: 'text/html' });
                   const url = URL.createObjectURL(blob);
@@ -1960,8 +1994,8 @@ function PortalPublico() {
 
               {mostrarHistorialPortal && (
                 <div className="mt-2 space-y-1.5 p-3 bg-slate-900/90 rounded-xl border border-slate-800">
-                  {(Array.isArray(ordenConsultaResult.observaciones) ? ordenConsultaResult.observaciones : []).length > 0 ? (
-                    ordenConsultaResult.observaciones.map((obs, idx) => (
+                  {(Array.isArray(ordenConsultaResult.observaciones) ? ordenConsultaResult.observaciones.filter(obs => !obs || obs._tipo !== 'garantia') : []).length > 0 ? (
+                    ordenConsultaResult.observaciones.filter(obs => !obs || obs._tipo !== 'garantia').map((obs, idx) => (
                       <p key={idx} className="text-[11px] text-slate-300">🔹 <span className="text-slate-500 font-mono">[{obs.fecha}]</span> {obs.texto}</p>
                     ))
                   ) : (
